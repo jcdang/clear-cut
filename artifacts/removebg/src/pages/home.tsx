@@ -414,36 +414,40 @@ export default function Home() {
             </div>
           )}
 
-          {appState === "processing" && queue[currentIndex] && (
-            <div className="w-full max-w-md animate-in zoom-in-95 fade-in duration-300">
-              <div className="bg-card border rounded-3xl p-10 flex flex-col items-center text-center shadow-lg relative overflow-hidden">
-                <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-primary/50 to-transparent animate-pulse" />
-                
-                <div className="relative w-32 h-32 mb-8">
-                  <div className="absolute inset-0 bg-primary/10 rounded-2xl animate-pulse" />
-                  <img src={queue[currentIndex].originalUrl} alt="Processing" className="w-full h-full object-cover rounded-2xl shadow-sm opacity-50" />
-                  <div className="absolute inset-0 flex items-center justify-center">
-                    <div className="w-12 h-12 bg-background/80 backdrop-blur rounded-full flex items-center justify-center shadow-sm animate-spin-slow">
-                      <RefreshCw className="w-5 h-5 text-primary" />
+          {appState === "processing" && queue.length > 0 && (() => {
+            const displayItem = queue[Math.min(currentIndex, queue.length - 1)];
+            const displayNum = Math.min(currentIndex + 1, queue.length);
+            return (
+              <div className="w-full max-w-md animate-in zoom-in-95 fade-in duration-300">
+                <div className="bg-card border rounded-3xl p-10 flex flex-col items-center text-center shadow-lg relative overflow-hidden">
+                  <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-primary/50 to-transparent animate-pulse" />
+                  
+                  <div className="relative w-32 h-32 mb-8">
+                    <div className="absolute inset-0 bg-primary/10 rounded-2xl animate-pulse" />
+                    <img src={displayItem.originalUrl} alt="Processing" className="w-full h-full object-cover rounded-2xl shadow-sm opacity-50" />
+                    <div className="absolute inset-0 flex items-center justify-center">
+                      <div className="w-12 h-12 bg-background/80 backdrop-blur rounded-full flex items-center justify-center shadow-sm animate-spin-slow">
+                        <RefreshCw className="w-5 h-5 text-primary" />
+                      </div>
+                    </div>
+                  </div>
+                  
+                  <h2 className="text-xl font-semibold mb-2 text-foreground">
+                    {queue.length > 1 ? `Processing (${displayNum} of ${queue.length})` : 'Processing Image'}
+                  </h2>
+                  <p className="text-sm text-muted-foreground mb-8 min-h-[1.5rem] font-medium">{stats.stage}</p>
+                  
+                  <div className="w-full space-y-2">
+                    <Progress value={stats.progress} className="h-2.5 w-full bg-accent" />
+                    <div className="flex justify-between text-xs text-muted-foreground font-mono">
+                      <span>{stats.progress}%</span>
+                      <span>100%</span>
                     </div>
                   </div>
                 </div>
-                
-                <h2 className="text-xl font-semibold mb-2 text-foreground">
-                  Processing {queue.length > 1 ? `(${currentIndex + 1} of ${queue.length})` : 'Image'}
-                </h2>
-                <p className="text-sm text-muted-foreground mb-8 min-h-[1.5rem] font-medium">{stats.stage}</p>
-                
-                <div className="w-full space-y-2">
-                  <Progress value={stats.progress} className="h-2.5 w-full bg-accent" />
-                  <div className="flex justify-between text-xs text-muted-foreground font-mono">
-                    <span>{stats.progress}%</span>
-                    <span>100%</span>
-                  </div>
-                </div>
               </div>
-            </div>
-          )}
+            );
+          })()}
 
           {appState === "result" && currentViewItem?.resultUrl && (
             <div className="w-full max-w-4xl animate-in fade-in slide-in-from-bottom-4 duration-500 space-y-6">
