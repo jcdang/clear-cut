@@ -12,7 +12,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - id: meta
-        uses: dependabot/fetch-metadata@v2
+        uses: dependabot/fetch-metadata@v3
 
       # Auto-merge patch + minor (and grouped) updates after CI passes.
       # Major bumps require a human eyeballing the changelog.
