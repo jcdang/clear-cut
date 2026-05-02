@@ -12,6 +12,9 @@ import {
   ImagePlus,
   XCircle,
   Github,
+  ChevronLeft,
+  ChevronRight,
+  Plus,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
@@ -119,6 +122,7 @@ export default function Home() {
   const [copyFeedback, setCopyFeedback] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const addInputRef = useRef<HTMLInputElement>(null);
   const bgInputRef = useRef<HTMLInputElement>(null);
 
   // Use refs so cleanup never accidentally fires mid-processing due to stale closures
@@ -157,54 +161,70 @@ export default function Home() {
     setCustomBgColor("transparent");
     setCustomBgImageUrl(null);
     if (fileInputRef.current) fileInputRef.current.value = "";
+    if (addInputRef.current) addInputRef.current.value = "";
     if (bgInputRef.current) bgInputRef.current.value = "";
   }, []);
 
+  // Updates queue items by id (not index) so the same routine can be used
+  // for the initial batch and for items appended later via addToQueue.
+  const processItems = useCallback(async (items: BatchQueueItem[]) => {
+    for (const item of items) {
+      if (item.status !== "pending") continue;
+
+      setQueue((prev) =>
+        prev.map((q) =>
+          q.id === item.id ? { ...q, status: "processing" } : q,
+        ),
+      );
+
+      try {
+        const blob = await removeBackground(item.file, {
+          model: "isnet_quint8",
+          progress: (key, current, total) => {
+            let stageName = key;
+            let indeterminate = false;
+            if (key.includes("fetch:model"))
+              stageName = "Downloading AI model...";
+            else if (key.includes("fetch:inference"))
+              stageName = "Loading inference engine...";
+            else if (key.includes("compute:inference"))
+              stageName = "Removing background...";
+            else if (key.includes("compute:decode")) {
+              stageName = "Generating output image...";
+              indeterminate = true;
+            }
+            const pct = total > 0 ? Math.round((current / total) * 100) : 0;
+            setStats({ stage: stageName, progress: pct, indeterminate });
+          },
+        });
+
+        const resultUrl = URL.createObjectURL(blob);
+        item.status = "done";
+        item.resultUrl = resultUrl;
+        setQueue((prev) =>
+          prev.map((q) =>
+            q.id === item.id ? { ...q, status: "done", resultUrl } : q,
+          ),
+        );
+      } catch (error) {
+        console.error("Processing error:", error);
+        item.status = "error";
+        setQueue((prev) =>
+          prev.map((q) => (q.id === item.id ? { ...q, status: "error" } : q)),
+        );
+      }
+    }
+  }, []);
+
+  // Initial-batch flow: full-screen "processing" UI, then transition to result.
   const processQueue = useCallback(
     async (items: BatchQueueItem[]) => {
       setAppState("processing");
       setStats({ stage: "Initializing model...", progress: 0 });
 
       for (let i = 0; i < items.length; i++) {
-        const item = items[i];
-        if (item.status !== "pending") continue;
-
         setCurrentIndex(i);
-        setQueue((prev) =>
-          prev.map((q, idx) =>
-            idx === i ? { ...q, status: "processing" } : q,
-          ),
-        );
-
-        try {
-          const blob = await removeBackground(item.file, {
-            model: "isnet_quint8",
-            progress: (key, current, total) => {
-              let stageName = key;
-              let indeterminate = false;
-              if (key.includes("fetch:model"))
-                stageName = "Downloading AI model...";
-              else if (key.includes("fetch:inference"))
-                stageName = "Loading inference engine...";
-              else if (key.includes("compute:inference"))
-                stageName = "Removing background...";
-              else if (key.includes("compute:decode")) {
-                stageName = "Generating output image...";
-                indeterminate = true;
-              }
-              const pct = total > 0 ? Math.round((current / total) * 100) : 0;
-              setStats({ stage: stageName, progress: pct, indeterminate });
-            },
-          });
-
-          const resultUrl = URL.createObjectURL(blob);
-          items[i] = { ...item, status: "done", resultUrl };
-          setQueue((prev) => prev.map((q, idx) => (idx === i ? items[i] : q)));
-        } catch (error) {
-          console.error("Processing error:", error);
-          items[i] = { ...item, status: "error" };
-          setQueue((prev) => prev.map((q, idx) => (idx === i ? items[i] : q)));
-        }
+        await processItems([items[i]]);
       }
 
       const firstDoneIdx = items.findIndex((x) => x.status === "done");
@@ -215,8 +235,45 @@ export default function Home() {
         resetState();
       }
     },
-    [resetState],
+    [processItems, resetState],
   );
+
+  // Append-and-process flow: stays in result view, processes the new
+  // items in the background. Per-thumbnail spinners in the queue strip
+  // give the user feedback.
+  const addToQueue = useCallback(
+    async (files: FileList | File[]) => {
+      const validFiles = Array.from(files).filter(isValidImage);
+      if (validFiles.length === 0) return;
+
+      const newItems: BatchQueueItem[] = validFiles.map((file) => ({
+        id: Math.random().toString(36).substring(7),
+        file,
+        originalUrl: URL.createObjectURL(file),
+        resultUrl: null,
+        status: "pending",
+      }));
+
+      setQueue((prev) => [...prev, ...newItems]);
+      await processItems(newItems);
+    },
+    [processItems],
+  );
+
+  // Carousel navigation: skip non-done items so the slider only ever
+  // shows finished cutouts. Reads queue from ref to keep this stable.
+  const navigate = useCallback((dir: -1 | 1) => {
+    setViewIndex((current) => {
+      const doneIndices = queueRef.current
+        .map((q, i) => (q.status === "done" ? i : -1))
+        .filter((i) => i >= 0);
+      const pos = doneIndices.indexOf(current);
+      if (pos === -1) return current;
+      const next = pos + dir;
+      if (next < 0 || next >= doneIndices.length) return current;
+      return doneIndices[next];
+    });
+  }, []);
 
   const handleFiles = useCallback(
     (files: FileList | File[]) => {
@@ -246,21 +303,53 @@ export default function Home() {
   );
 
   useEffect(() => {
-    if (appState !== "upload") return;
+    if (appState === "processing") return;
     const handlePaste = (e: ClipboardEvent) => {
       const items = Array.from(e.clipboardData?.items ?? []);
       const imageFiles = items
         .filter((item) => item.type.startsWith("image/"))
         .map((item) => item.getAsFile())
         .filter((f): f is File => f !== null);
-      if (imageFiles.length > 0) handleFiles(imageFiles);
+      if (imageFiles.length === 0) return;
+      if (appState === "upload") handleFiles(imageFiles);
+      else void addToQueue(imageFiles);
     };
     document.addEventListener("paste", handlePaste);
     return () => document.removeEventListener("paste", handlePaste);
-  }, [appState, handleFiles]);
+  }, [appState, handleFiles, addToQueue]);
+
+  // Keyboard arrow nav between done items in the result view.
+  useEffect(() => {
+    if (appState !== "result") return;
+    const onKey = (e: KeyboardEvent) => {
+      const t = e.target;
+      if (
+        t instanceof HTMLElement &&
+        (t.tagName === "INPUT" ||
+          t.tagName === "TEXTAREA" ||
+          t.isContentEditable)
+      ) {
+        return;
+      }
+      if (e.key === "ArrowLeft") {
+        e.preventDefault();
+        navigate(-1);
+      } else if (e.key === "ArrowRight") {
+        e.preventDefault();
+        navigate(1);
+      }
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [appState, navigate]);
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files) handleFiles(e.target.files);
+  };
+
+  const handleAddSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files) void addToQueue(e.target.files);
+    e.target.value = "";
   };
 
   const handleBgFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -407,6 +496,17 @@ export default function Home() {
 
   const currentViewItem = queue[viewIndex];
 
+  const doneIndices = queue
+    .map((q, i) => (q.status === "done" ? i : -1))
+    .filter((i) => i >= 0);
+  const currentDonePosition = doneIndices.indexOf(viewIndex);
+  const canPrev = currentDonePosition > 0;
+  const canNext =
+    currentDonePosition >= 0 && currentDonePosition < doneIndices.length - 1;
+  const isAnyProcessing = queue.some(
+    (q) => q.status === "pending" || q.status === "processing",
+  );
+
   const backgroundStyle: React.CSSProperties = customBgImageUrl
     ? {
         backgroundImage: "url(" + customBgImageUrl + ")",
@@ -416,19 +516,19 @@ export default function Home() {
     : { backgroundColor: customBgColor };
 
   return (
-    <div className="min-h-screen flex flex-col bg-background selection:bg-primary/20 selection:text-primary">
-      <header className="h-16 flex items-center px-6 lg:px-12 border-b bg-card z-10 sticky top-0">
-        <div className="flex items-center gap-2 font-semibold text-xl tracking-tight text-foreground">
-          <Wand2 className="w-5 h-5 text-primary" />
+    <div className="h-dvh overflow-hidden flex flex-col bg-background selection:bg-primary/20 selection:text-primary">
+      <header className="h-10 flex items-center px-4 lg:px-8 border-b bg-card z-10 shrink-0">
+        <div className="flex items-center gap-1.5 font-semibold text-sm tracking-tight text-foreground">
+          <Wand2 className="w-4 h-4 text-primary" />
           ClearCut
         </div>
-        <div className="ml-auto flex items-center gap-4">
-          <div className="text-sm text-muted-foreground items-center gap-4 hidden sm:flex">
-            <span className="flex items-center gap-1.5">
-              <ShieldCheck className="w-4 h-4" /> 100% Local
+        <div className="ml-auto flex items-center gap-3">
+          <div className="text-xs text-muted-foreground items-center gap-3 hidden sm:flex">
+            <span className="flex items-center gap-1">
+              <ShieldCheck className="w-3.5 h-3.5" /> 100% Local
             </span>
-            <span className="flex items-center gap-1.5">
-              <Zap className="w-4 h-4" /> Fast & Free
+            <span className="flex items-center gap-1">
+              <Zap className="w-3.5 h-3.5" /> Fast & Free
             </span>
           </div>
           <a
@@ -438,13 +538,13 @@ export default function Home() {
             aria-label="View source on GitHub"
             className="text-muted-foreground hover:text-foreground transition-colors"
           >
-            <Github className="w-5 h-5" />
+            <Github className="w-4 h-4" />
           </a>
         </div>
       </header>
 
-      <main className="flex-1 flex flex-col items-center justify-center p-6 w-full max-w-5xl mx-auto">
-        <div className="w-full flex flex-col items-center">
+      <main className="flex-1 min-h-0 flex flex-col items-center justify-center p-4 sm:p-6 w-full max-w-5xl mx-auto overflow-hidden">
+        <div className="w-full flex-1 min-h-0 flex flex-col items-center">
           {appState === "upload" && (
             <div className="w-full max-w-2xl animate-in fade-in slide-in-from-bottom-4 duration-500">
               <div className="text-center mb-8">
@@ -566,25 +666,56 @@ export default function Home() {
             })()}
 
           {appState === "result" && currentViewItem?.resultUrl && (
-            <div className="w-full max-w-4xl animate-in fade-in slide-in-from-bottom-4 duration-500 space-y-6">
-              <CompareSlider
-                originalUrl={currentViewItem.originalUrl}
-                resultUrl={currentViewItem.resultUrl}
-                backgroundStyle={backgroundStyle}
-              />
+            <div className="w-full max-w-4xl h-full flex flex-col gap-3 animate-in fade-in slide-in-from-bottom-4 duration-500">
+              <div className="relative flex-1 min-h-0 flex items-center justify-center">
+                <CompareSlider
+                  originalUrl={currentViewItem.originalUrl}
+                  resultUrl={currentViewItem.resultUrl}
+                  backgroundStyle={backgroundStyle}
+                />
+
+                {doneIndices.length > 1 && (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => navigate(-1)}
+                      disabled={!canPrev}
+                      aria-label="Previous image"
+                      className={cn(
+                        "absolute left-3 top-1/2 -translate-y-1/2 z-10 w-10 h-10 rounded-full bg-background/80 backdrop-blur shadow-lg flex items-center justify-center transition-all",
+                        "hover:bg-background hover:scale-105 focus:outline-none focus:ring-2 focus:ring-primary",
+                        !canPrev && "opacity-30 cursor-not-allowed",
+                      )}
+                    >
+                      <ChevronLeft className="w-5 h-5" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => navigate(1)}
+                      disabled={!canNext}
+                      aria-label="Next image"
+                      className={cn(
+                        "absolute right-3 top-1/2 -translate-y-1/2 z-10 w-10 h-10 rounded-full bg-background/80 backdrop-blur shadow-lg flex items-center justify-center transition-all",
+                        "hover:bg-background hover:scale-105 focus:outline-none focus:ring-2 focus:ring-primary",
+                        !canNext && "opacity-30 cursor-not-allowed",
+                      )}
+                    >
+                      <ChevronRight className="w-5 h-5" />
+                    </button>
+                    <div className="absolute top-3 left-1/2 -translate-x-1/2 z-10 px-3 py-1 rounded-full bg-background/80 backdrop-blur text-xs font-medium text-foreground shadow-sm">
+                      {currentDonePosition + 1} of {doneIndices.length}
+                    </div>
+                  </>
+                )}
+              </div>
 
               {queue.length > 1 && (
-                <div className="bg-card border rounded-2xl p-4 shadow-sm">
-                  <div className="flex items-center justify-between mb-3">
-                    <h3 className="text-sm font-semibold text-foreground">
-                      Batch Queue
-                    </h3>
-                    <span className="text-xs text-muted-foreground">
-                      {queue.filter((q) => q.status === "done").length} of{" "}
-                      {queue.length} done
-                    </span>
-                  </div>
-                  <div className="flex gap-3 overflow-x-auto pb-2 scrollbar-thin">
+                <div className="bg-card border rounded-xl px-3 py-2 shadow-sm flex items-center gap-3 shrink-0">
+                  <span className="text-xs text-muted-foreground whitespace-nowrap">
+                    {queue.filter((q) => q.status === "done").length} of{" "}
+                    {queue.length}
+                  </span>
+                  <div className="flex gap-2 overflow-x-auto scrollbar-thin flex-1">
                     {queue.map((item, idx) => (
                       <button
                         key={item.id}
@@ -592,58 +723,46 @@ export default function Home() {
                           item.status === "done" && setViewIndex(idx)
                         }
                         disabled={item.status !== "done"}
+                        title={item.file.name}
                         className={cn(
-                          "relative flex-shrink-0 flex flex-col items-center gap-1 w-16 transition-all",
+                          "relative shrink-0 w-12 h-12 rounded-lg overflow-hidden border-2 bg-checkerboard bg-[length:8px_8px] transition-all",
                           viewIndex === idx
-                            ? "opacity-100"
-                            : "opacity-60 hover:opacity-100",
-                          item.status !== "done" &&
-                            "opacity-40 cursor-not-allowed",
+                            ? "border-primary shadow-sm scale-105"
+                            : "border-border opacity-70 hover:opacity-100",
+                          item.status !== "done" && "cursor-not-allowed",
                         )}
                       >
-                        <div
+                        <img
+                          src={item.resultUrl ?? item.originalUrl}
                           className={cn(
-                            "w-16 h-16 rounded-xl overflow-hidden border-2 relative bg-checkerboard bg-[length:8px_8px]",
-                            viewIndex === idx
-                              ? "border-primary shadow-sm"
-                              : "border-border",
+                            "w-full h-full object-cover",
+                            !item.resultUrl && "opacity-40",
                           )}
-                        >
-                          <img
-                            src={item.resultUrl ?? item.originalUrl}
-                            className={cn(
-                              "w-full h-full object-cover",
-                              !item.resultUrl && "opacity-40",
-                            )}
-                            alt="thumbnail"
-                          />
-                          {item.status === "processing" && (
-                            <div className="absolute inset-0 bg-black/30 flex items-center justify-center">
-                              <RefreshCw className="w-4 h-4 text-white animate-spin" />
-                            </div>
-                          )}
-                          {item.status === "error" && (
-                            <div className="absolute inset-0 bg-black/40 flex items-center justify-center">
-                              <XCircle className="w-6 h-6 text-red-500 fill-white" />
-                            </div>
-                          )}
-                        </div>
-                        <span className="text-[10px] text-muted-foreground truncate w-full text-center">
-                          {item.file.name}
-                        </span>
+                          alt={item.file.name}
+                        />
+                        {item.status === "processing" && (
+                          <div className="absolute inset-0 bg-black/30 flex items-center justify-center">
+                            <RefreshCw className="w-3.5 h-3.5 text-white animate-spin" />
+                          </div>
+                        )}
+                        {item.status === "error" && (
+                          <div className="absolute inset-0 bg-black/40 flex items-center justify-center">
+                            <XCircle className="w-4 h-4 text-red-500 fill-white" />
+                          </div>
+                        )}
                       </button>
                     ))}
                   </div>
                 </div>
               )}
 
-              <div className="bg-card border rounded-3xl p-6 shadow-sm">
-                <div className="flex flex-col sm:flex-row items-center justify-between gap-6">
-                  <div className="flex-1 w-full flex flex-col gap-3">
-                    <span className="text-sm font-medium text-muted-foreground">
+              <div className="bg-card border rounded-2xl p-3 shadow-sm shrink-0">
+                <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-2">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-xs font-medium text-muted-foreground mr-1">
                       Background
                     </span>
-                    <div className="flex flex-wrap items-center gap-2">
+                    <div className="flex flex-wrap items-center gap-1.5">
                       <button
                         onClick={() => bgInputRef.current?.click()}
                         className={cn(
@@ -701,22 +820,41 @@ export default function Home() {
                     </div>
                   </div>
 
-                  <div className="flex items-center gap-3 w-full sm:w-auto">
+                  <div className="flex items-center gap-2 flex-wrap">
                     <Button
                       variant="outline"
-                      size="lg"
+                      size="default"
                       onClick={resetState}
-                      className="flex-1 sm:flex-none rounded-xl"
+                      className="rounded-xl"
                     >
                       <RefreshCw className="w-4 h-4 mr-2" /> Start Over
                     </Button>
 
+                    <Button
+                      variant="outline"
+                      size="default"
+                      onClick={() => addInputRef.current?.click()}
+                      disabled={isAnyProcessing}
+                      className="rounded-xl"
+                      title="Add more images (or paste from clipboard)"
+                    >
+                      <Plus className="w-4 h-4 mr-2" /> Add more
+                    </Button>
+                    <input
+                      type="file"
+                      multiple
+                      accept="image/jpeg,image/png,image/webp"
+                      ref={addInputRef}
+                      onChange={handleAddSelect}
+                      className="hidden"
+                    />
+
                     <div className="relative">
                       <Button
                         variant="outline"
-                        size="lg"
+                        size="default"
                         onClick={() => copyToClipboard(currentViewItem)}
-                        className="flex-1 sm:flex-none rounded-xl"
+                        className="rounded-xl"
                       >
                         <Clipboard className="w-4 h-4 mr-2" /> Copy
                       </Button>
@@ -730,21 +868,21 @@ export default function Home() {
                     {queue.length > 1 && (
                       <Button
                         variant="outline"
-                        size="lg"
+                        size="default"
                         onClick={() => downloadResult(currentViewItem)}
-                        className="flex-1 sm:flex-none rounded-xl"
+                        className="rounded-xl"
                       >
                         <Download className="w-4 h-4 mr-2" /> Download This
                       </Button>
                     )}
                     <Button
-                      size="lg"
+                      size="default"
                       onClick={
                         queue.length > 1
                           ? downloadAll
                           : () => downloadResult(currentViewItem)
                       }
-                      className="flex-1 sm:flex-none rounded-xl shadow-md bg-primary hover:bg-primary/90 text-primary-foreground font-semibold px-8"
+                      className="rounded-xl shadow-md bg-primary hover:bg-primary/90 text-primary-foreground font-semibold px-6"
                     >
                       <Download className="w-4 h-4 mr-2" />{" "}
                       {queue.length > 1 ? "Download All (ZIP)" : "Download"}
@@ -757,12 +895,11 @@ export default function Home() {
         </div>
       </main>
 
-      <footer className="py-6 text-center text-sm text-muted-foreground space-y-2 px-6">
-        <p>
-          Processing happens entirely on your device. Your images are never
-          uploaded to any server.
-        </p>
-        <p className="text-xs">
+      <footer className="py-2 text-center text-xs text-muted-foreground px-6 shrink-0 flex items-center justify-center gap-3 flex-wrap">
+        <span className="hidden sm:inline">
+          Processing happens entirely on your device.
+        </span>
+        <span>
           <Dialog>
             <DialogTrigger className="underline-offset-4 hover:underline hover:text-foreground transition-colors">
               Credits & attributions
@@ -915,7 +1052,7 @@ export default function Home() {
               </div>
             </DialogContent>
           </Dialog>
-        </p>
+        </span>
       </footer>
     </div>
   );

@@ -55,15 +55,11 @@ export function CompareSlider({
     <div
       ref={sliderRef}
       className={cn(
-        "relative w-full rounded-3xl overflow-hidden select-none touch-none shadow-md border-2 border-primary/20 group",
-        !naturalRatio && "aspect-video",
+        "relative rounded-3xl overflow-hidden select-none touch-none shadow-md border-2 border-primary/20 group",
+        naturalRatio ? "w-full max-h-full" : "w-full h-full",
         className,
       )}
-      style={
-        naturalRatio
-          ? { aspectRatio: String(naturalRatio), maxHeight: "80vh" }
-          : undefined
-      }
+      style={naturalRatio ? { aspectRatio: String(naturalRatio) } : undefined}
       onPointerDown={(e) => {
         const rect = sliderRef.current?.getBoundingClientRect();
         if (rect) {
