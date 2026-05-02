@@ -1,4 +1,5 @@
 import { useState, useCallback, useRef, useEffect } from "react";
+import type React from "react";
 import { removeBackground } from "@imgly/background-removal";
 import { UploadCloud, Download, RefreshCw, Wand2, Zap, ShieldCheck, CheckCircle2, Clipboard, ImagePlus, XCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -92,17 +93,23 @@ export default function Home() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const bgInputRef = useRef<HTMLInputElement>(null);
 
-  const cleanupUrls = useCallback(() => {
-    queue.forEach(item => {
-      if (item.originalUrl) URL.revokeObjectURL(item.originalUrl);
-      if (item.resultUrl) URL.revokeObjectURL(item.resultUrl);
-    });
-    if (customBgImageUrl) URL.revokeObjectURL(customBgImageUrl);
-  }, [queue, customBgImageUrl]);
+  // Use refs so cleanup never accidentally fires mid-processing due to stale closures
+  const queueRef = useRef<BatchQueueItem[]>([]);
+  const bgImageUrlRef = useRef<string | null>(null);
 
+  useEffect(() => { queueRef.current = queue; }, [queue]);
+  useEffect(() => { bgImageUrlRef.current = customBgImageUrl; }, [customBgImageUrl]);
+
+  // Only revoke URLs on true unmount
   useEffect(() => {
-    return () => cleanupUrls();
-  }, [cleanupUrls]);
+    return () => {
+      queueRef.current.forEach(item => {
+        URL.revokeObjectURL(item.originalUrl);
+        if (item.resultUrl) URL.revokeObjectURL(item.resultUrl);
+      });
+      if (bgImageUrlRef.current) URL.revokeObjectURL(bgImageUrlRef.current);
+    };
+  }, []);
 
   const processNextInQueue = useCallback(async () => {
     if (currentIndex >= queue.length) {
@@ -227,7 +234,12 @@ export default function Home() {
   };
 
   const resetState = () => {
-    cleanupUrls();
+    // Explicitly revoke all URLs before clearing state
+    queue.forEach(item => {
+      URL.revokeObjectURL(item.originalUrl);
+      if (item.resultUrl) URL.revokeObjectURL(item.resultUrl);
+    });
+    if (customBgImageUrl) URL.revokeObjectURL(customBgImageUrl);
     setAppState("upload");
     setQueue([]);
     setCurrentIndex(0);
