@@ -1,0 +1,26 @@
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 10
+    groups:
+      patches-and-minors:
+        update-types:
+          - patch
+          - minor
+    ignore:
+      # Pinned to 1.21.0 because @imgly/background-removal has it as
+      # an exact peer dep; bumping it desynchronizes the WASM/JS shim.
+      - dependency-name: onnxruntime-web
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      patches-and-minors:
+        update-types:
+          - patch
+          - minor
