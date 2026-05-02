@@ -21,11 +21,12 @@ Privacy-first background removal that runs entirely in your browser. Drop in an 
 ## Features
 
 - Drop, click, or paste images (JPEG, PNG, WEBP)
-- Batch processing — queue up many files at once
+- Batch processing — queue up many files, navigate results with arrow keys
+- "Add more" mid-flight to append to an in-progress batch
 - Composite the cutout onto a solid color or your own background image
 - Side-by-side comparison slider for the before/after
 - Export individual PNGs or download the whole batch as a zip
-- Works offline once loaded
+- Installable as a PWA, fully offline-capable after first visit (model and WASM runtime cached locally)
 
 Your images never leave your device — inference happens locally in the browser.
 
@@ -33,7 +34,16 @@ Your images never leave your device — inference happens locally in the browser
 
 Background removal is handled by [@imgly/background-removal](https://github.com/imgly/background-removal-js), which runs an ONNX segmentation model directly in the browser. It uses WebGPU when available and falls back to threaded WebAssembly.
 
-For the WASM path to actually use multiple threads, the page needs `SharedArrayBuffer`, which requires the document to be cross-origin isolated (`COOP: same-origin` + `COEP: require-corp` response headers). GitHub Pages can't set custom response headers, so [coi-serviceworker](https://github.com/gzuidhof/coi-serviceworker) installs a tiny service worker that intercepts every response and rewrites the headers. The same SW also adds `CORP: cross-origin` to all responses, which lets the cross-origin model fetches from imgly's CDN keep working.
+For the WASM path to actually use multiple threads, the page needs `SharedArrayBuffer`, which requires the document to be cross-origin isolated (`COOP: same-origin` + `COEP: require-corp` response headers). GitHub Pages can't set custom response headers, so a service worker (`src/sw.ts`, generated via [vite-plugin-pwa](https://vite-pwa-org.netlify.app)) intercepts every response and rewrites the headers. `CORP: cross-origin` is also injected so cross-origin model fetches keep working.
+
+The same service worker handles offline caching:
+
+- **App shell** (HTML, JS, CSS, manifest) is precached at install time — about 2 MB.
+- **Same-origin runtime assets** (the ~24 MB ONNX Runtime WASM bundle, lazy chunks, etc.) use a `CacheFirst` strategy: fetched on first use, served from cache thereafter. Vite's content-hashed filenames make this safe across builds.
+- **Imgly's model CDN** (`staticimgly.com`) and **Google Fonts** are also `CacheFirst`.
+- After the React app mounts, `preload()` from `@imgly/background-removal` warms up the model in the background so it lands in the cache before the user processes their first image. The header shows a small `Caching for offline… N%` → `Ready offline` indicator while this runs.
+
+The result: a single visit while online is enough to make the entire app — including the segmentation model — work without a network connection on every subsequent visit.
 
 ## Local development
 
@@ -63,6 +73,7 @@ pnpm dev
 
 - **UI**: React 19, Vite 7, Tailwind CSS 4, [shadcn/ui](https://ui.shadcn.com) on Radix UI, Lucide icons
 - **Inference**: @imgly/background-removal, [ONNX Runtime Web](https://onnxruntime.ai)
+- **Offline / PWA**: vite-plugin-pwa (injectManifest), custom service worker for cross-origin isolation + asset caching
 - **Tooling**: TypeScript 5.9, Vitest + happy-dom + @testing-library/react, ESLint 9 (flat config), Prettier
 - **Hosting**: GitHub Pages via GitHub Actions, served from `jcdang.com/clear-cut/`
 - **Supply-chain hardening**: pnpm with `minimum-release-age=1440` (24h quarantine on new npm releases) — defense against shai-hulud-style attacks
