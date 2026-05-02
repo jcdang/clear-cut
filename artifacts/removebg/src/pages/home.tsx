@@ -177,7 +177,7 @@ export default function Home() {
     }
   }, [currentIndex, appState, processNextInQueue, queue]);
 
-  const handleFiles = (files: FileList | File[]) => {
+  const handleFiles = useCallback((files: FileList | File[]) => {
     const validFiles = Array.from(files).filter(f => isValidImage(f));
     if (validFiles.length === 0) return;
 
@@ -198,7 +198,21 @@ export default function Home() {
       URL.revokeObjectURL(customBgImageUrl);
       setCustomBgImageUrl(null);
     }
-  };
+  }, [customBgImageUrl]);
+
+  useEffect(() => {
+    if (appState !== "upload") return;
+    const handlePaste = (e: ClipboardEvent) => {
+      const items = Array.from(e.clipboardData?.items ?? []);
+      const imageFiles = items
+        .filter(item => item.type.startsWith("image/"))
+        .map(item => item.getAsFile())
+        .filter((f): f is File => f !== null);
+      if (imageFiles.length > 0) handleFiles(imageFiles);
+    };
+    document.addEventListener("paste", handlePaste);
+    return () => document.removeEventListener("paste", handlePaste);
+  }, [appState, handleFiles]);
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files) handleFiles(e.target.files);
@@ -383,7 +397,8 @@ export default function Home() {
                   <UploadCloud className="w-10 h-10" />
                 </div>
                 <h3 className="text-xl font-semibold mb-2 text-foreground">Click or drop images here</h3>
-                <p className="text-sm text-muted-foreground mb-6 text-center">Supports multiple JPEG, PNG, WEBP</p>
+                <p className="text-sm text-muted-foreground mb-1 text-center">Supports multiple JPEG, PNG, WEBP</p>
+                <p className="text-xs text-muted-foreground/70 mb-6 text-center">or paste from clipboard (Ctrl+V)</p>
                 <Button size="lg" className="rounded-full pointer-events-none px-8">
                   Browse Files
                 </Button>
@@ -460,13 +475,17 @@ export default function Home() {
                         )}
                       >
                         <div className={cn(
-                          "w-16 h-16 rounded-xl overflow-hidden border-2 relative",
+                          "w-16 h-16 rounded-xl overflow-hidden border-2 relative bg-checkerboard bg-[length:8px_8px]",
                           viewIndex === idx ? "border-primary shadow-sm" : "border-border"
                         )}>
-                          <img src={item.originalUrl} className="w-full h-full object-cover" alt="thumbnail" />
-                          {item.status === 'done' && (
-                            <div className="absolute inset-0 bg-black/20 flex items-center justify-center">
-                              <CheckCircle2 className="w-6 h-6 text-green-400 fill-black/50" />
+                          <img
+                            src={item.resultUrl ?? item.originalUrl}
+                            className={cn("w-full h-full object-cover", !item.resultUrl && "opacity-40")}
+                            alt="thumbnail"
+                          />
+                          {item.status === 'processing' && (
+                            <div className="absolute inset-0 bg-black/30 flex items-center justify-center">
+                              <RefreshCw className="w-4 h-4 text-white animate-spin" />
                             </div>
                           )}
                           {item.status === 'error' && (
@@ -549,6 +568,11 @@ export default function Home() {
                       )}
                     </div>
 
+                    {queue.length > 1 && (
+                      <Button variant="outline" size="lg" onClick={() => downloadResult(currentViewItem)} className="flex-1 sm:flex-none rounded-xl">
+                        <Download className="w-4 h-4 mr-2" /> Download This
+                      </Button>
+                    )}
                     <Button size="lg" onClick={queue.length > 1 ? downloadAll : () => downloadResult(currentViewItem)} className="flex-1 sm:flex-none rounded-xl shadow-md bg-primary hover:bg-primary/90 text-primary-foreground font-semibold px-8">
                       <Download className="w-4 h-4 mr-2" /> {queue.length > 1 ? "Download All (ZIP)" : "Download"}
                     </Button>

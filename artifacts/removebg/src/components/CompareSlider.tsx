@@ -11,6 +11,7 @@ interface CompareSliderProps {
 
 export function CompareSlider({ originalUrl, resultUrl, backgroundStyle, className }: CompareSliderProps) {
   const [position, setPosition] = useState(50);
+  const [naturalRatio, setNaturalRatio] = useState<number | null>(null);
   const sliderRef = useRef<HTMLDivElement>(null);
   const isDragging = useRef(false);
 
@@ -40,9 +41,14 @@ export function CompareSlider({ originalUrl, resultUrl, backgroundStyle, classNa
   }, [handlePointerMove]);
 
   return (
-    <div 
+    <div
       ref={sliderRef}
-      className={cn("relative w-full aspect-square sm:aspect-video rounded-3xl overflow-hidden select-none touch-none shadow-md border-2 border-primary/20 group", className)}
+      className={cn(
+        "relative w-full rounded-3xl overflow-hidden select-none touch-none shadow-md border-2 border-primary/20 group",
+        !naturalRatio && "aspect-video",
+        className
+      )}
+      style={naturalRatio ? { aspectRatio: String(naturalRatio), maxHeight: "80vh" } : undefined}
       onPointerDown={(e) => {
         const rect = sliderRef.current?.getBoundingClientRect();
         if (rect) {
@@ -61,7 +67,18 @@ export function CompareSlider({ originalUrl, resultUrl, backgroundStyle, classNa
         style={backgroundStyle && (backgroundStyle.backgroundColor !== 'transparent' || backgroundStyle.backgroundImage) ? backgroundStyle : undefined}
       />
       
-      <img src={resultUrl} alt="Result" className="absolute inset-0 w-full h-full object-contain drop-shadow-2xl" draggable={false} />
+      <img
+        src={resultUrl}
+        alt="Result"
+        className="absolute inset-0 w-full h-full object-contain drop-shadow-2xl"
+        draggable={false}
+        onLoad={(e) => {
+          const img = e.currentTarget;
+          if (img.naturalWidth && img.naturalHeight) {
+            setNaturalRatio(img.naturalWidth / img.naturalHeight);
+          }
+        }}
+      />
 
       <div 
         className="absolute inset-0 w-full h-full"
@@ -72,17 +89,17 @@ export function CompareSlider({ originalUrl, resultUrl, backgroundStyle, classNa
       </div>
 
       <div 
-        className="absolute top-1/2 -translate-y-1/2 w-8 h-8 bg-white rounded-full shadow-lg flex items-center justify-center cursor-ew-resize z-10"
+        className="absolute top-1/2 -translate-y-1/2 w-9 h-9 bg-white rounded-full shadow-lg flex items-center justify-center cursor-ew-resize z-10 ring-1 ring-black/10"
         style={{ left: `${position}%`, transform: 'translate(-50%, -50%)' }}
       >
-        <ChevronsLeftRight className="w-4 h-4 text-slate-800" />
+        <ChevronsLeftRight className="w-4 h-4 text-slate-700" />
       </div>
 
-      <div className="absolute top-4 left-4 bg-black/50 backdrop-blur text-white px-3 py-1 rounded-full text-xs font-medium opacity-0 transition-opacity pointer-events-none group-hover:opacity-100 z-20">
-        Before
+      <div className="absolute top-3 left-3 bg-black/40 backdrop-blur-sm text-white px-2.5 py-1 rounded-full text-[11px] font-semibold tracking-wide pointer-events-none z-20 select-none">
+        BEFORE
       </div>
-      <div className="absolute top-4 right-4 bg-black/50 backdrop-blur text-white px-3 py-1 rounded-full text-xs font-medium opacity-0 transition-opacity pointer-events-none group-hover:opacity-100 z-20">
-        After
+      <div className="absolute top-3 right-3 bg-black/40 backdrop-blur-sm text-white px-2.5 py-1 rounded-full text-[11px] font-semibold tracking-wide pointer-events-none z-20 select-none">
+        AFTER
       </div>
     </div>
   );
