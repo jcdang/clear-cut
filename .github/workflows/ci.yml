@@ -32,7 +32,7 @@ jobs:
       - run: pnpm test:coverage
       - run: pnpm build
         env:
-          BASE_PATH: /Clear-Cut/
+          BASE_PATH: /clear-cut/
 
       - uses: actions/upload-artifact@v4
         if: always()
