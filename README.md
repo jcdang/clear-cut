@@ -36,6 +36,8 @@ Background removal is handled by [@imgly/background-removal](https://github.com/
 
 For the WASM path to actually use multiple threads, the page needs `SharedArrayBuffer`, which requires the document to be cross-origin isolated (`COOP: same-origin` + `COEP: require-corp` response headers). GitHub Pages can't set custom response headers, so a service worker (`src/sw.ts`, generated via [vite-plugin-pwa](https://vite-pwa-org.netlify.app)) intercepts every response and rewrites the headers. `CORP: cross-origin` is also injected so cross-origin model fetches keep working.
 
+In dev (`pnpm dev`) the service worker is intentionally not registered — Vite's dev server sets the COOP/COEP headers directly via `server.headers` in `vite.config.ts`. This avoids a fragile interaction between vite-plugin-pwa's dev shim and Vite's HMR client at startup, and it keeps a stale dev SW from sticking around in the browser between runs. To exercise the actual production SW (offline caching, header rewrap, model preload) locally, run `pnpm build && pnpm preview` — note that preview defaults to port 4173, a different origin from dev's 5173, so the two SWs never collide.
+
 The same service worker handles offline caching:
 
 - **App shell** (HTML, JS, CSS, manifest) is precached at install time — about 2 MB.

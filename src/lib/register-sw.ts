@@ -9,16 +9,23 @@ import { setOfflineStatus } from "./offline-status";
 // controller yet, reload once the new SW activates.
 export async function registerServiceWorker() {
   if (!("serviceWorker" in navigator)) return;
+  // SW only runs in production builds. In dev, Vite sets COOP/COEP via
+  // server.headers (see vite.config.ts), so we don't need the SW for
+  // cross-origin isolation. We also actively unregister any SW left
+  // over from prior dev sessions (or from a previous version of this
+  // app that did register one in dev) — otherwise it keeps controlling
+  // the page, intercepting fetches, and serving stale HTML that breaks
+  // HMR.
+  if (import.meta.env.DEV) {
+    void unregisterAllAndClearCaches();
+    return;
+  }
 
   setOfflineStatus({ kind: "registering" });
 
   try {
-    // Dev mode serves the SW at <base>/dev-sw.js?dev-sw (vite-plugin-pwa
-    // convention); production builds emit <base>/sw.js.
     const base = import.meta.env.BASE_URL;
-    const swUrl = import.meta.env.DEV
-      ? `${base}dev-sw.js?dev-sw`
-      : `${base}sw.js`;
+    const swUrl = `${base}sw.js`;
     const reg = await navigator.serviceWorker.register(swUrl, {
       type: "module",
       scope: base,
@@ -51,6 +58,28 @@ export async function registerServiceWorker() {
       kind: "error",
       message: err instanceof Error ? err.message : String(err),
     });
+  }
+}
+
+// Dev-only cleanup: nuke any service worker + caches that were
+// installed by an earlier version of this app (or by vite-plugin-pwa's
+// dev shim). After unregistering we reload once so the page detaches
+// from the old controller. Guarded by sessionStorage to avoid a loop.
+async function unregisterAllAndClearCaches() {
+  try {
+    const regs = await navigator.serviceWorker.getRegistrations();
+    if (regs.length === 0) return;
+    await Promise.all(regs.map((r) => r.unregister()));
+    if ("caches" in self) {
+      const names = await caches.keys();
+      await Promise.all(names.map((n) => caches.delete(n)));
+    }
+    if (!sessionStorage.getItem("clearcut-dev-sw-cleaned")) {
+      sessionStorage.setItem("clearcut-dev-sw-cleaned", "1");
+      window.location.reload();
+    }
+  } catch (err) {
+    console.warn("Dev SW cleanup failed:", err);
   }
 }
 

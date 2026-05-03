@@ -23,13 +23,18 @@ export default defineConfig({
         globPatterns: ["**/*.{js,mjs,css,html,svg,ico,webmanifest}"],
         globIgnores: ["**/*.wasm"],
       },
-      devOptions: {
-        enabled: true,
-        type: "module",
-        navigateFallback: "index.html",
-      },
+      // No devOptions: the SW only runs in production builds. In dev,
+      // Vite serves COOP/COEP via server.headers below — that's enough
+      // to enable threaded WASM without dragging in vite-plugin-pwa's
+      // dev shim, which races Vite's HMR client at startup.
     }),
   ],
+  server: {
+    headers: {
+      "Cross-Origin-Embedder-Policy": "require-corp",
+      "Cross-Origin-Opener-Policy": "same-origin",
+    },
+  },
   optimizeDeps: {
     exclude: ["@imgly/background-removal", "onnxruntime-web"],
   },

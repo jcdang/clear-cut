@@ -148,16 +148,31 @@ async function handle(req: Request): Promise<Response> {
   }
 }
 
+// Dedupe in-flight cacheFirst fetches by URL so concurrent callers (e.g.
+// imgly's loader hitting resources.json three times in quick succession)
+// share one network request instead of racing the cache.put.
+const inflight = new Map<string, Promise<Response>>();
+
 async function cacheFirst(req: Request, cacheName: string): Promise<Response> {
   const cache = await caches.open(cacheName);
   const cached = await cache.match(req);
   if (cached) return withCOI(cached);
-  const res = await fetch(req);
-  // Only cache opaque-or-ok responses; never cache 4xx/5xx.
-  if (res.ok || res.type === "opaque") {
-    cache.put(req, res.clone()).catch(() => {});
+
+  const key = req.url;
+  let pending = inflight.get(key);
+  if (!pending) {
+    pending = (async () => {
+      const res = await fetch(req);
+      // Only cache opaque-or-ok responses; never cache 4xx/5xx.
+      if (res.ok || res.type === "opaque") {
+        await cache.put(req, res.clone());
+      }
+      return res;
+    })().finally(() => inflight.delete(key));
+    inflight.set(key, pending);
   }
-  return withCOI(res);
+  const shared = await pending;
+  return withCOI(shared.clone());
 }
 
 // Rewrap with COOP/COEP/CORP so the page is cross-origin-isolated.
